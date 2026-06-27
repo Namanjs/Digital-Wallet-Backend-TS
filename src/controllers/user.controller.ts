@@ -4,10 +4,12 @@ import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { User } from "../models/user.model";
 import { uploadOnCloudinary } from "../utils/cloudinary";
-import type { login, register } from "../validators/user.validator";
-import { loginSchema, registerSchema } from "../validators/user.validator";
+import type { login, register, passwordChange } from "../validators/user.validator";
+import { loginSchema, passwordChangeSchema, registerSchema } from "../validators/user.validator";
 import z, { ZodSafeParseResult } from "zod";
 import { UploadApiResponse } from "cloudinary";
+import jwt from "jsonwebtoken";
+import { DecodeToken } from "../middleware/auth.middleware";
 
 const registerUser = asyncHandler(async (req: Request, res: Response) => {    
     const validateData: ZodSafeParseResult<register> = registerSchema.safeParse(req.body);
@@ -127,7 +129,124 @@ const loginUser = asyncHandler(async (req: Request, res: Response) => {
         )
 });
 
+const logoutUser = asyncHandler(async (req: Request, res: Response) => {
+    const user = await User.findById(req.user?._id);
+
+    if(!user){
+        throw new ApiError(401, "Unauthorized access")
+    }
+
+    user.refreshToken = "";
+
+    const options = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV == "production"
+    }
+
+    return res
+        .status(200)
+        .clearCookie("accessToken", options)
+        .clearCookie("refreshToken", options)
+        .json(
+            new ApiResponse(
+                200,
+                {},
+                "User log out successfully"
+            )
+        )
+});
+
+const refreshAccessToken = asyncHandler(async (req: Request, res: Response) => {
+    const refreshToken = req.cookies?.refreshToken;
+
+    if(!refreshToken){
+        throw new ApiError(403, "Refresh Token is missing");
+    }
+
+    const decodedToken = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET as jwt.Secret);
+
+    const user = await User.findById((decodedToken as DecodeToken)._id);
+
+    if(!user){
+        throw new ApiError(404, "User associated with refresh token not found");
+    }
+
+    if(user.refreshToken !== refreshToken){
+        throw new ApiError(401, "Refresh token as been revoked or invalid");
+    }
+
+    const options = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV == "production"
+    }
+
+    const accessToken = user.generateAccessToken();
+    const newRefreshToken = user.generateRefreshToken();
+
+    user.refreshToken = newRefreshToken;
+
+    await user.save({ validateBeforeSave: false });
+
+    return res
+        .status(200)
+        .cookie("accessToken", accessToken, options)
+        .cookie("refreshToken", newRefreshToken, options)
+        .json(
+            new ApiResponse(
+                200,
+                {
+                    accessToken,
+                    refreshToken: newRefreshToken
+                },
+                "Access Token refresh successfully"
+            )
+        )
+})
+
+const changeCurrentPassword = asyncHandler(async (req: Request, res: Response) => {
+    const validateData: z.ZodSafeParseResult<passwordChange> = passwordChangeSchema.safeParse(req.body);
+
+    if(!validateData.success){
+        const errors = z.treeifyError(validateData.error);
+        throw new ApiError(400, "Bad request", [errors.properties])
+    }
+
+    const { oldPassword, newPassword } = validateData.data;
+
+    const user = await User.findById(req.user?._id);
+
+    if(!user){
+        throw new ApiError(401, "Unauthorized access");
+    }
+
+    const isPasswordValid = await user.isPasswordCorrect(oldPassword);
+
+    if(!isPasswordValid){
+        throw new ApiError(400, "Password is wrong")
+    }
+
+    user.password = newPassword;
+
+    await user.save();
+
+    return res.status(200).json(
+        new ApiResponse(200, {}, "Password updated successfully")
+    )
+})
+
+const getCurrentUser = asyncHandler(async (req: Request, res: Response) => {
+    const user = req.user;
+
+    return res.status(200).json(
+        new ApiResponse(200, user, "User fetched successfully")
+    )
+});
+
 export {
     registerUser,
-    loginUser
+    loginUser,
+    logoutUser,
+    refreshAccessToken,
+    changeCurrentPassword,
+    getCurrentUser
 }

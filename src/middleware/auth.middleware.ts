@@ -3,8 +3,7 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { ApiError } from "../utils/ApiError";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { User } from "../models/user.model";
-
-interface DecodeToken extends JwtPayload {
+export interface DecodeToken extends JwtPayload {
     _id: string
 }
 

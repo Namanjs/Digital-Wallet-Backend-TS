@@ -17,12 +17,21 @@ const loginSchema = z.object({
 
 type login = z.infer<typeof loginSchema>;
 
-export type {
-    register,
-    login
-}
+const passwordChangeSchema = z.object({
+    oldPassword: z.string(),
+    newPassword: z.string().min(8, "Password must be 8 characters long")
+});
+
+type passwordChange = z.infer<typeof passwordChangeSchema>;
 
 export {
     registerSchema,
-    loginSchema
+    loginSchema,
+    passwordChangeSchema
+}
+
+export type {
+    register,
+    login,
+    passwordChange
 }
