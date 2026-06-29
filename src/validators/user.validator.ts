@@ -24,14 +24,24 @@ const passwordChangeSchema = z.object({
 
 type passwordChange = z.infer<typeof passwordChangeSchema>;
 
+const updateDetailSchema = z.object({
+    newUsername: z.string().min(8, "Username must be 8 characters long").optional(),
+    newEmail: z.email("Invalid email address").optional(),
+    newFullName: z.string().optional().nullable()
+});
+
+type updateDetail = z.infer<typeof updateDetailSchema>;
+
 export {
     registerSchema,
     loginSchema,
-    passwordChangeSchema
+    passwordChangeSchema,
+    updateDetailSchema
 }
 
 export type {
     register,
     login,
-    passwordChange
+    passwordChange,
+    updateDetail
 }

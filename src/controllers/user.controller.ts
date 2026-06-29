@@ -4,8 +4,8 @@ import { ApiError } from "../utils/ApiError";
 import { ApiResponse } from "../utils/ApiResponse";
 import { User } from "../models/user.model";
 import { uploadOnCloudinary } from "../utils/cloudinary";
-import type { login, register, passwordChange } from "../validators/user.validator";
-import { loginSchema, passwordChangeSchema, registerSchema } from "../validators/user.validator";
+import type { login, register, passwordChange, updateDetail } from "../validators/user.validator";
+import { loginSchema, passwordChangeSchema, registerSchema, updateDetailSchema } from "../validators/user.validator";
 import z, { ZodSafeParseResult } from "zod";
 import { UploadApiResponse } from "cloudinary";
 import jwt from "jsonwebtoken";
@@ -242,11 +242,148 @@ const getCurrentUser = asyncHandler(async (req: Request, res: Response) => {
     )
 });
 
+const updateUserDetails = asyncHandler(async (req: Request, res: Response) => {
+    const validateData: ZodSafeParseResult<updateDetail> = updateDetailSchema.safeParse(req.body);
+
+    if(!validateData.success){
+        const errors = z.treeifyError(validateData.error);
+        throw new ApiError(400, "Bad Request", [errors.properties])
+    }
+
+    const { newUsername, newEmail, newFullName } = validateData.data;
+
+    const user = req.user;
+
+    if(!user){
+        throw new ApiError(401, "Unauthorized request")
+    }    
+    interface update{
+        username?: string,
+        fullName?: string,
+        email?: string
+    }
+
+    let updates: update = {};
+
+    if(newUsername && newUsername !== user.username){
+        const isDuplicateUsername = await User.findOne({ 
+            username: newUsername
+        });
+
+        if(isDuplicateUsername){
+            throw new ApiError(409, "Username already taken");
+        }
+
+        updates.username = newUsername;
+    }
+
+    if(newEmail && newEmail !== user.email){
+        const isDuplicateEmail = await User.findOne({
+            email: newEmail
+        });
+
+        if(isDuplicateEmail){
+            throw new ApiError(409, "Email already registered")
+        }
+
+        updates.email = newEmail;
+    }
+
+    if(newFullName){
+        updates.fullName = newFullName;
+    }
+
+    if(Object.keys(updates).length === 0){
+        throw new ApiError(400, "No new changes")
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+        user._id,
+        {
+            $set: updates
+        },
+        { 
+            returnDocument: "after"
+        }
+    ).select("-password -refreshToken");
+
+    if(!updatedUser){
+        throw new ApiError(500, "Something went wrong while updating account details")
+    }
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            updatedUser,
+            "Details updated successfully"
+        )
+    )
+})
+
+const updateUserAvatar = asyncHandler(async (req: Request, res: Response) => {
+    const avatarLocalFilePath = (req.files as any)?.avatar?.[0]?.path;
+
+    let avatar: UploadApiResponse | null = null;
+
+    if (avatarLocalFilePath) {
+        avatar = await uploadOnCloudinary(avatarLocalFilePath);
+
+        if(!avatar?.url){
+            throw new ApiError(500, "Something went wrong while uploading the avatar file or the file is not an image")
+        }
+    }
+
+    const user = await User.findByIdAndUpdate(
+        req.user?._id,
+        {
+            $set: {
+                avatar: avatar?.url
+            }
+        },
+        { 
+            returnDocument: "after"
+        }
+    ).select("-password -refreshToken");
+
+    return res.status(200).json(
+        new ApiResponse(200, user, "Avatar updated successfully")
+    )
+});
+
+const searchUser = asyncHandler(async (req: Request, res: Response) => {
+    const { query } = req.query;
+
+    if (typeof query !== "string") {
+        throw new ApiError(400, "Search query is required");
+    }
+
+    const users = await User.find({
+        $or: [
+            { username: { $regex: query, $options: "i" } },
+            { email: { $regex: query, $options: "i" } },
+            { fullName: { $regex: query, $options: "i" } }
+        ]
+    }).select("-password -refreshToken -balance");
+
+    if(!users.length){
+        throw new ApiError(404, "No user found matching the query")
+    }
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(200, users, "User fetched successfully")
+        )
+});
+
 export {
     registerUser,
     loginUser,
     logoutUser,
     refreshAccessToken,
     changeCurrentPassword,
-    getCurrentUser
+    getCurrentUser,
+    updateUserDetails,
+    updateUserAvatar,
+    searchUser
 }
